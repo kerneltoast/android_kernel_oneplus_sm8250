@@ -16491,7 +16491,7 @@ static void hdd_driver_unload(void)
  *
  * Return: 0 for success, errno on failure
  */
-static int hdd_module_init(void)
+int hdd_module_init(void)
 {
 	if (hdd_driver_load())
 		return -EINVAL;
@@ -17921,9 +17921,11 @@ QDF_STATUS hdd_monitor_mode_vdev_status(struct hdd_adapter *adapter)
 }
 #endif
 
+#ifdef MODULE
 /* Register the module init/exit functions */
 module_init(hdd_module_init);
 module_exit(hdd_module_exit);
+#endif
 
 MODULE_LICENSE("Dual BSD/GPL");
 MODULE_AUTHOR("Qualcomm Atheros, Inc.");
