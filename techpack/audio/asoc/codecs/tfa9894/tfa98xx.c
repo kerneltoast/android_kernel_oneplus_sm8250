@@ -115,8 +115,8 @@ static int get_profile_from_list(char *buf, int id);
 static int get_profile_id_for_sr(int id, unsigned int rate);
 static enum Tfa98xx_Error tfa9874_calibrate(struct tfa98xx **tfa98xx, int *speakerImpedance);
 
-extern int send_tfa_cal_apr(void *buf, int cmd_size, bool bRead);
-extern int send_tfa_cal_in_band(void *buf, int cmd_size);
+static inline int send_tfa_cal_apr(void *buf, int cmd_size, bool bRead) { return 0; }
+static inline int send_tfa_cal_in_band(void *buf, int cmd_size) { return 0; }
 
 
 struct tfa98xx_rate {
