@@ -123,6 +123,7 @@ struct dsi_backlight_config {
 	u32 bl_scale_sv;
 	bool bl_inverted_dbv;
 	u32 bl_dcs_subtype;
+	u32 bl_def_val;
 
 	int en_gpio;
 	/* PWM params */
