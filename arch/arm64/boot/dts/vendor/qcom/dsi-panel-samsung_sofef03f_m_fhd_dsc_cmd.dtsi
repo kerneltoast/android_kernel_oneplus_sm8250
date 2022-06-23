@@ -50,7 +50,7 @@
 			qcom,mdss-dsi-te-using-te-pin;
 			qcom,mdss-dsi-lp11-init;
 			qcom,mdss-dsi-high-brightness-panel;
-			qcom,mdss-bl-high2bit;
+			qcom,mdss-dsi-bl-inverted-dbv;
 			qcom,mdss-loading-effect;
 			qcom,mdss-dsi-panel-jitter = <0x4 0x1>;
 			qcom,dynamic-mode-switch-enabled;

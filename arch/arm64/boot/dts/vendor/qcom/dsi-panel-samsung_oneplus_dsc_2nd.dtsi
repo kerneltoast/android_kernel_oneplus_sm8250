@@ -55,7 +55,7 @@
 		qcom,mdss-dsi-high-brightness-panel;
 		qcom,mdss-dsi-acl-cmd-index = <0>;
 		qcom,mdss-dsi-acl-mode-index = <1>;
-		qcom,mdss-bl-high2bit;
+		qcom,mdss-dsi-bl-inverted-dbv;
 		qcom,mdss-dsi-panel-jitter = <0x8 0xa>;
 		qcom,dynamic-mode-switch-enabled;
 		qcom,dynamic-mode-switch-type = "dynamic-resolution-switch-immediate";

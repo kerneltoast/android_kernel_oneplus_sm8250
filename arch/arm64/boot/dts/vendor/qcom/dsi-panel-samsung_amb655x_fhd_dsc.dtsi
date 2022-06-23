@@ -58,7 +58,7 @@
 		qcom,mdss-dsi-panel-status-value = <0x9C>;
 		qcom,mdss-dsi-panel-status-read-length = <1>;
 		qcom,mdss-dsi-lp11-init;
-		qcom,mdss-bl-high2bit;
+		qcom,mdss-dsi-bl-inverted-dbv;
 		qcom,mdss-loading-effect;
 		qcom,mdss-dsi-panel-manufacture = "SAMSUNG";
 		qcom,mdss-dsi-panel-version = "DSC";

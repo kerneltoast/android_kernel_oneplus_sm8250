@@ -52,7 +52,7 @@
 		qcom,mdss-dsi-wr-mem-start = <0x2c>;
 		qcom,mdss-dsi-wr-mem-continue = <0x3c>;
 		qcom,mdss-dsi-panel-jitter = <0x4 0x1>;
-		qcom,mdss-bl-high2bit;
+		qcom,mdss-dsi-bl-inverted-dbv;
 		/* HDR Setting */
 		qcom,mdss-dsi-panel-hdr-enabled;
 		qcom,mdss-dsi-panel-hdr-color-primaries = <15635 16450 34000 16000 13250 34500 7500 3000>;
