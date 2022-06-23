@@ -665,6 +665,8 @@ static const struct attribute_group gf_attribute_group = {
 static struct fp_underscreen_info fp_tpinfo ={0};
 int opticalfp_irq_handler(struct fp_underscreen_info* tp_info)
 {
+	char msg;
+
 	pr_info("[info]:%s", __func__);
 
 	if (gf.spi == NULL) {
@@ -676,10 +678,14 @@ int opticalfp_irq_handler(struct fp_underscreen_info* tp_info)
 		pr_err("TOUCH DOWN, fp_tpinfo.x = %d, fp_tpinfo.y = %d \n", fp_tpinfo.x, fp_tpinfo.y);
 		fp_tpinfo.touch_state = GF_NET_EVENT_TP_TOUCHDOWN;
 		sendnlmsg_tp(&fp_tpinfo,sizeof(fp_tpinfo));
+		msg = GF_NET_EVENT_UI_READY;
+		sendnlmsg(&msg);
 	} else if (fp_tpinfo.touch_state == 0) {
 		pr_err("TOUCH UP, fp_tpinfo.x = %d, fp_tpinfo.y = %d \n", fp_tpinfo.x, fp_tpinfo.y);
 		fp_tpinfo.touch_state = GF_NET_EVENT_TP_TOUCHUP;
 		sendnlmsg_tp(&fp_tpinfo,sizeof(fp_tpinfo));
+		msg = GF_NET_EVENT_UI_DISAPPEAR;
+		sendnlmsg(&msg);
 	}
 	return 0;
 }
@@ -765,7 +771,6 @@ static struct notifier_block goodix_noti_block = {
 	.notifier_call = goodix_fb_state_chg_callback,
 };
 #elif defined(CONFIG_MSM_RDM_NOTIFY)
-#define DRM_PANEL_ONSCREENFINGERPRINT_EVENT DRM_PANEL_EARLY_EVENT_BLANK
 static int goodix_fb_state_chg_callback(
 	struct notifier_block *nb, unsigned long val, void *data)
 {
@@ -776,32 +781,10 @@ static int goodix_fb_state_chg_callback(
 	char msg = 0;
 	pr_debug("[info] %s go to the msm_drm_notifier_callback value = %d\n",
 			__func__, (int)val);
-	if (val != DRM_PANEL_EARLY_EVENT_BLANK &&
-		val != DRM_PANEL_ONSCREENFINGERPRINT_EVENT)
+	if (val != DRM_PANEL_EARLY_EVENT_BLANK)
 		return 0;
 	
 	blank = *(int *)(evdata->data);
-
-	if (val == DRM_PANEL_ONSCREENFINGERPRINT_EVENT) {
-		pr_info("[%s] UI ready enter\n", __func__);
-
-		switch (blank) {
-		case 0:
-			pr_info("[%s] UI disappear\n", __func__);
-			msg = GF_NET_EVENT_UI_DISAPPEAR;
-			sendnlmsg(&msg);
-			break;
-		case 1:
-			pr_info("[%s] UI ready\n", __func__);
-			msg = GF_NET_EVENT_UI_READY;
-			sendnlmsg(&msg);
-			break;
-		default:
-			pr_info("[%s] Unknown EVENT\n", __func__);
-			break;
-		}
-		return 0;
-	}
 
 	gf_dev = container_of(nb, struct gf_dev, msm_drm_notif);
 	if (evdata && evdata->data && val ==
