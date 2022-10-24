@@ -241,7 +241,8 @@ struct sde_dgm_csc {
 	struct {
 		u16 r, g, b; /* 16 bits covers the max PCC value per channel */
 	} pcc;
-	u32 bl_lvl;
+	atomic_t commit_nr;
+	u32 bl_lvl, cur_bl_lvl;
 	u32 bl_max;
 };
 
@@ -687,4 +688,11 @@ int sde_kms_handle_recovery(struct drm_encoder *encoder);
  */
 void sde_kms_update_pm_qos_irq_request(struct sde_kms *sde_kms,
 	 bool enable, bool skip_lock);
+
+/**
+ * sde_kms_null_commit - perform a null commit on the given connector
+ * @conn: pointer to sde_connector
+ */
+struct sde_connector;
+void sde_kms_null_commit(struct sde_connector *conn);
 #endif /* __sde_kms_H__ */

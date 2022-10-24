@@ -2068,7 +2068,6 @@ static int sde_kms_set_crtc_for_conn(struct drm_device *dev,
 		return -EINVAL;
 	}
 
-	crtc_state = drm_atomic_get_crtc_state(state, enc->crtc);
 	conn_state = drm_atomic_get_connector_state(state, conn);
 	if (IS_ERR(conn_state)) {
 		SDE_ERROR("error %d getting connector %d state\n",
@@ -2076,6 +2075,8 @@ static int sde_kms_set_crtc_for_conn(struct drm_device *dev,
 		return -EINVAL;
 	}
 
+	crtc_state = drm_atomic_get_crtc_state(state, enc->crtc ? :
+					       conn_state->crtc);
 	crtc_state->active = true;
 	ret = drm_atomic_set_crtc_for_connector(conn_state, enc->crtc);
 	if (ret)
@@ -2826,7 +2827,8 @@ retry:
 	if (ret == -EDEADLK && retry_cnt < SDE_KMS_MODESET_LOCK_MAX_TRIALS) {
 		drm_modeset_backoff(&ctx);
 		retry_cnt++;
-		udelay(SDE_KMS_MODESET_LOCK_TIMEOUT_US);
+		usleep_range(SDE_KMS_MODESET_LOCK_TIMEOUT_US,
+			     SDE_KMS_MODESET_LOCK_TIMEOUT_US * 2);
 		goto retry;
 	} else if (WARN_ON(ret)) {
 		goto end;
@@ -2854,6 +2856,11 @@ end:
 
 	drm_modeset_drop_locks(&ctx);
 	drm_modeset_acquire_fini(&ctx);
+}
+
+void sde_kms_null_commit(struct sde_connector *conn)
+{
+	_sde_kms_null_commit(conn->base.dev, conn->encoder);
 }
 
 static void _sde_kms_pm_suspend_idle_helper(struct sde_kms *sde_kms,

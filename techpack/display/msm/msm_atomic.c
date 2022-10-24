@@ -20,6 +20,7 @@
 #include "msm_drv.h"
 #include "msm_gem.h"
 #include "msm_kms.h"
+#include "sde_kms.h"
 #include "sde_trace.h"
 
 #define MULTIPLE_CONN_DETECTED(x) (x > 1)
@@ -771,8 +772,13 @@ error:
 
 struct drm_atomic_state *msm_atomic_state_alloc(struct drm_device *dev)
 {
-	struct msm_kms_state *state = kzalloc(sizeof(*state), GFP_KERNEL);
+	struct sde_dgm_csc *dgm = &to_sde_kms(ddev_to_msm_kms(dev))->dgm_csc;
+	struct msm_kms_state *state;
 
+	/* Assume a commit will happen if there's a state alloc */
+	if (IS_ENABLED(CONFIG_SDE_DGM_DIMMING))
+		atomic_inc(&dgm->commit_nr);
+	state = kzalloc(sizeof(*state), GFP_KERNEL);
 	if (!state || drm_atomic_state_init(dev, &state->base) < 0) {
 		kfree(state);
 		return NULL;

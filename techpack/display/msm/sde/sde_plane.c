@@ -4931,7 +4931,7 @@ void sde_plane_update_dgm_dimming(struct drm_crtc *crtc, struct sde_kms *kms)
 
 	/* Get a consistent view of the backlight level and PCC config */
 	spin_lock(&dgm->lock);
-	bl_lvl = dgm->bl_lvl;
+	bl_lvl = dgm->cur_bl_lvl = dgm->bl_lvl;
 	csc.csc_mv[0] = dgm->pcc.r;
 	csc.csc_mv[4] = dgm->pcc.g;
 	csc.csc_mv[8] = dgm->pcc.b;

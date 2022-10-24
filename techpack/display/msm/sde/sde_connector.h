@@ -469,6 +469,8 @@ struct sde_connector {
 
 	struct backlight_device *bl_device;
 	struct delayed_work status_work;
+	struct delayed_work dgm_bl_work;
+	u32 commit_nr;
 	u32 esd_status_interval;
 	bool panel_dead;
 	bool esd_status_check;

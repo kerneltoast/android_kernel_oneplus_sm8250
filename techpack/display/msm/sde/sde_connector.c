@@ -66,6 +66,26 @@ static const struct drm_prop_enum_list e_frame_trigger_mode[] = {
 	{FRAME_DONE_WAIT_POSTED_START, "posted_start"},
 };
 
+static void sde_dgm_dimming_bl_work(struct work_struct *work)
+{
+	struct sde_connector *conn = container_of(to_delayed_work(work),
+						  typeof(*conn), dgm_bl_work);
+	struct sde_dgm_csc *dgm = &sde_encoder_get_kms(conn->encoder)->dgm_csc;
+	bool bl_stale;
+
+	/* Skip the null commit if a commit happened or is about to happen */
+	if (READ_ONCE(conn->commit_nr) != atomic_read(&dgm->commit_nr))
+		return;
+
+	spin_lock(&dgm->lock);
+	bl_stale = dgm->bl_lvl != dgm->cur_bl_lvl;
+	spin_unlock(&dgm->lock);
+
+	/* Update the backlight with a null commit if it hasn't been updated */
+	if (bl_stale)
+		sde_kms_null_commit(conn);
+}
+
 static int sde_backlight_device_update_status(struct backlight_device *bd)
 {
 	int brightness;
@@ -110,6 +130,23 @@ static int sde_backlight_device_update_status(struct backlight_device *bd)
 		rc = c_conn->ops.set_backlight(&c_conn->base,
 				c_conn->display, bl_lvl);
 		c_conn->unset_bl_level = 0;
+
+		/*
+		 * Update the backlight with a null commit after a delay in case
+		 * a commit will naturally update the backlight anyway, since
+		 * null commits are expensive in that userspace cannot commit
+		 * while a null commit is underway. A commit is necessary to
+		 * update the backlight when DGM dimming is used.
+		 */
+		if (IS_ENABLED(CONFIG_SDE_DGM_DIMMING) && !rc) {
+			struct sde_dgm_csc *dgm =
+				&sde_encoder_get_kms(c_conn->encoder)->dgm_csc;
+
+			WRITE_ONCE(c_conn->commit_nr,
+				   atomic64_read(&dgm->commit_nr));
+			schedule_delayed_work(&c_conn->dgm_bl_work,
+					      msecs_to_jiffies(32));
+		}
 	}
 
 	return rc;
@@ -881,6 +918,7 @@ void sde_connector_helper_bridge_disable(struct drm_connector *connector)
 		c_conn->bl_device->props.power = FB_BLANK_POWERDOWN;
 		c_conn->bl_device->props.state |= BL_CORE_FBBLANK;
 		backlight_update_status(c_conn->bl_device);
+		flush_delayed_work(&c_conn->dgm_bl_work);
 	}
 
 	c_conn->allow_bl_update = false;
@@ -2708,6 +2746,7 @@ struct drm_connector *sde_connector_init(struct drm_device *dev,
 
 	INIT_DELAYED_WORK(&c_conn->status_work,
 			sde_connector_check_status_work);
+	INIT_DELAYED_WORK(&c_conn->dgm_bl_work, sde_dgm_dimming_bl_work);
 
 	return &c_conn->base;
 
