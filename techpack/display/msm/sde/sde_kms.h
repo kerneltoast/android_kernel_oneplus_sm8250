@@ -232,6 +232,19 @@ struct sde_irq {
 	struct dentry *debugfs_file;
 };
 
+/* Max value per color channel for CSC and PCC HW blocks */
+#define SDE_HW_CSC_MAX 512
+#define SDE_HW_PCC_MAX 32768
+
+struct sde_dgm_csc {
+	spinlock_t lock;
+	struct {
+		u16 r, g, b; /* 16 bits covers the max PCC value per channel */
+	} pcc;
+	u32 bl_lvl;
+	u32 bl_max;
+};
+
 struct sde_kms {
 	struct msm_kms base;
 	struct drm_device *dev;
@@ -300,6 +313,9 @@ struct sde_kms {
 	struct pm_qos_request pm_qos_irq_req;
 	struct irq_affinity_notify affinity_notify;
 	bool pm_qos_irq_req_en;
+
+	struct sde_dgm_csc dgm_csc;
+	bool fod_present;
 };
 
 /**

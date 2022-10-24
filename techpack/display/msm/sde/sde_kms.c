@@ -1214,6 +1214,7 @@ static void sde_kms_complete_commit(struct msm_kms *kms,
 	SDE_ATRACE_END("sde_kms_complete_commit");
 }
 
+void oneplus_fod_ready(void);
 static void sde_kms_wait_for_commit_done(struct msm_kms *kms,
 		struct drm_crtc *crtc)
 {
@@ -1266,6 +1267,10 @@ static void sde_kms_wait_for_commit_done(struct msm_kms *kms,
 			sde_crtc_request_frame_reset(crtc);
 			break;
 		}
+
+		/* Page flip is done, fod circle is on the screen now */
+		if (to_sde_kms(kms)->fod_present)
+			oneplus_fod_ready();
 
 		sde_crtc_complete_flip(crtc, NULL);
 
@@ -1730,6 +1735,11 @@ static int _sde_kms_drm_obj_init(struct sde_kms *sde_kms)
 	/* Create the planes */
 	for (i = 0; i < catalog->sspp_count; i++) {
 		bool primary = true;
+
+		/* Only use DMA pipes in order to have DGM CSC on all layers */
+		if (IS_ENABLED(CONFIG_SDE_DGM_DIMMING) &&
+		    !(catalog->sspp[i].features & BIT(SDE_SSPP_DGM_CSC)))
+			continue;
 
 		if (catalog->sspp[i].features & BIT(SDE_SSPP_CURSOR)
 			|| primary_planes_idx >= max_crtc_count)
@@ -3864,6 +3874,11 @@ static int sde_kms_hw_init(struct msm_kms *kms)
 	irq_num = platform_get_irq(to_platform_device(sde_kms->dev->dev), 0);
 	SDE_DEBUG("Registering for notification of irq_num: %d\n", irq_num);
 	irq_set_affinity_notifier(irq_num, &sde_kms->affinity_notify);
+
+	spin_lock_init(&sde_kms->dgm_csc.lock);
+	sde_kms->dgm_csc.pcc = (typeof(sde_kms->dgm_csc.pcc)){
+		SDE_HW_PCC_MAX, SDE_HW_PCC_MAX, SDE_HW_PCC_MAX
+	};
 
 	return 0;
 

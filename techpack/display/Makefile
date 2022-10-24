@@ -28,3 +28,6 @@ endif
 obj-$(CONFIG_DRM_MSM) += msm/
 obj-$(CONFIG_MSM_SDE_ROTATOR) += rotator/
 obj-$(CONFIG_QCOM_MDSS_PLL) += pll/
+
+# Enable software brightness control and color adjustments through the DGM block
+subdir-ccflags-y := -DCONFIG_SDE_DGM_DIMMING=1

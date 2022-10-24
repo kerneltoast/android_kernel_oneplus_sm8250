@@ -662,6 +662,18 @@ static const struct attribute_group gf_attribute_group = {
 	.attrs = gf_attributes,
 };
 
+static atomic_t fodwaiting;
+void oneplus_fod_ready(void)
+{
+	char msg;
+
+	if (!atomic_xchg_acquire(&fodwaiting, 0))
+		return;
+
+	msg = GF_NET_EVENT_UI_READY;
+	sendnlmsg(&msg);
+}
+
 static struct fp_underscreen_info fp_tpinfo ={0};
 int opticalfp_irq_handler(struct fp_underscreen_info* tp_info)
 {
@@ -678,9 +690,9 @@ int opticalfp_irq_handler(struct fp_underscreen_info* tp_info)
 		pr_err("TOUCH DOWN, fp_tpinfo.x = %d, fp_tpinfo.y = %d \n", fp_tpinfo.x, fp_tpinfo.y);
 		fp_tpinfo.touch_state = GF_NET_EVENT_TP_TOUCHDOWN;
 		sendnlmsg_tp(&fp_tpinfo,sizeof(fp_tpinfo));
-		msg = GF_NET_EVENT_UI_READY;
-		sendnlmsg(&msg);
+		atomic_set_release(&fodwaiting, 1);
 	} else if (fp_tpinfo.touch_state == 0) {
+		atomic_set_release(&fodwaiting, 0);
 		pr_err("TOUCH UP, fp_tpinfo.x = %d, fp_tpinfo.y = %d \n", fp_tpinfo.x, fp_tpinfo.y);
 		fp_tpinfo.touch_state = GF_NET_EVENT_TP_TOUCHUP;
 		sendnlmsg_tp(&fp_tpinfo,sizeof(fp_tpinfo));

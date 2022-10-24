@@ -3350,6 +3350,9 @@ static void sde_crtc_atomic_flush(struct drm_crtc *crtc,
 		cstate->rsc_update = true;
 	}
 
+	/* Update the DGM dimming state for each active plane on this CRTC */
+	sde_plane_update_dgm_dimming(crtc, sde_kms);
+
 	/*
 	 * Final plane updates: Give each plane a chance to complete all
 	 *                      required writes/flushing before crtc's "flush

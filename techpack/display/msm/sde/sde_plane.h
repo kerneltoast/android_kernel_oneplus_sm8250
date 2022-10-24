@@ -308,4 +308,10 @@ void sde_plane_setup_src_split_order(struct drm_plane *plane,
  */
 bool sde_plane_is_cache_required(struct drm_plane *plane);
 
+/**
+ * sde_plane_update_dgm_dimming - update DGM dimming state
+ * @crtc: Pointer to DRM CRTC state object
+ * @kms: Pointer to sde_kms
+ */
+void sde_plane_update_dgm_dimming(struct drm_crtc *crtc, struct sde_kms *kms);
 #endif /* _SDE_PLANE_H_ */

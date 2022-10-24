@@ -234,11 +234,35 @@ static int set_dspp_vlut_feature(struct sde_hw_dspp *hw_dspp,
 	return ret;
 }
 
+static int sde_setup_sspp_dgm_pcc(struct sde_hw_cp_cfg *hw_cfg,
+				  struct sde_crtc *hw_crtc)
+{
+	struct drm_msm_pcc *pcc;
+	struct sde_dgm_csc *dgm;
+
+	if (!hw_crtc)
+		return -EINVAL;
+
+	/* Other functions don't return -EINVAL for the payload checks */
+	pcc = hw_cfg->payload;
+	if (!pcc || hw_cfg->len != sizeof(struct drm_msm_pcc))
+		return 0;
+
+	dgm = &get_kms(&hw_crtc->base)->dgm_csc;
+	spin_lock(&dgm->lock);
+	dgm->pcc = (typeof(dgm->pcc)){ pcc->r.r, pcc->g.g, pcc->b.b };
+	spin_unlock(&dgm->lock);
+	return 0;
+}
+
 static int set_dspp_pcc_feature(struct sde_hw_dspp *hw_dspp,
 				struct sde_hw_cp_cfg *hw_cfg,
 				struct sde_crtc *hw_crtc)
 {
 	int ret = 0;
+
+	if (IS_ENABLED(CONFIG_SDE_DGM_DIMMING))
+		return sde_setup_sspp_dgm_pcc(hw_cfg, hw_crtc);
 
 	if (!hw_dspp || !hw_dspp->ops.setup_pcc)
 		ret = -EINVAL;

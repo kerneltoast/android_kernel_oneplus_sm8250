@@ -126,7 +126,7 @@ static const struct backlight_ops sde_backlight_device_ops = {
 };
 
 static int sde_backlight_setup(struct sde_connector *c_conn,
-					struct drm_device *dev)
+		struct drm_device *dev, struct sde_kms *sde_kms)
 {
 	struct backlight_properties props;
 	struct dsi_display *display;
@@ -147,6 +147,7 @@ static int sde_backlight_setup(struct sde_connector *c_conn,
 
 	display = (struct dsi_display *) c_conn->display;
 	bl_config = &display->panel->bl_config;
+	sde_kms->dgm_csc.bl_max = bl_config->bl_max_level;
 	props.max_brightness = bl_config->brightness_max_level;
 	props.brightness = bl_config->bl_def_val;
 	snprintf(bl_node_name, BL_NODE_NAME_SIZE, "panel%u-backlight",
@@ -2660,7 +2661,7 @@ struct drm_connector *sde_connector_init(struct drm_device *dev,
 		goto error_cleanup_fence;
 	}
 
-	rc = sde_backlight_setup(c_conn, dev);
+	rc = sde_backlight_setup(c_conn, dev, sde_kms);
 	if (rc) {
 		SDE_ERROR("failed to setup backlight, rc=%d\n", rc);
 		goto error_cleanup_fence;

@@ -4071,11 +4071,59 @@ end:
 	return rc;
 }
 
+static int sde_init_dma_formats(struct sde_mdss_cfg *sde_cfg)
+{
+	struct sde_format_extended dma_plane_formats[ARRAY_SIZE(plane_formats)];
+	uint32_t dma_list_size = 0;
+	int i;
+
+	memset(&dma_plane_formats, 0, sizeof(dma_plane_formats));
+	for (i = 0; i < ARRAY_SIZE(plane_formats); i++) {
+		uint32_t fourcc = plane_formats[i].fourcc_format;
+
+		/* A FourCC format of zero means we've reached the end */
+		if (!fourcc) {
+			dma_list_size++;
+			break;
+		}
+
+		/*
+		 * Only allow formats with an alpha channel for DMA pipes when
+		 * DGM dimming is used, since it's the only way to prevent the
+		 * IGC block from dithering the alpha channel. This is because
+		 * alpha is simply represented by RGB values themselves when
+		 * there isn't any dedicated alpha channel. When alpha gets
+		 * dithered and the pixel format lacks an alpha channel, the
+		 * dithering results look bad and the layer mixer blends the
+		 * dithered layers incorrectly since the implicit alpha is
+		 * corrupted by the dithering process. All of this is avoided by
+		 * just mandating an explicit alpha channel in the pixel format.
+		 *
+		 * Support for an alpha channel is indicated in the FourCC
+		 * format by the presence of an 'A' anywhere inside of it.
+		 */
+		if (!IS_ENABLED(CONFIG_SDE_DGM_DIMMING) ||
+		    ((fourcc & GENMASK( 7,  0)) >>  0) == 'A' ||
+		    ((fourcc & GENMASK(15,  8)) >>  8) == 'A' ||
+		    ((fourcc & GENMASK(23, 16)) >> 16) == 'A' ||
+		    ((fourcc & GENMASK(31, 24)) >> 24) == 'A')
+			dma_plane_formats[dma_list_size++] = plane_formats[i];
+	}
+
+	dma_list_size *= sizeof(struct sde_format_extended);
+	sde_cfg->dma_formats = kmalloc(dma_list_size, GFP_KERNEL);
+	if (!sde_cfg->dma_formats)
+		return -ENOMEM;
+
+	memcpy(sde_cfg->dma_formats, dma_plane_formats, dma_list_size);
+	return 0;
+}
+
 static int sde_hardware_format_caps(struct sde_mdss_cfg *sde_cfg,
 	uint32_t hw_rev)
 {
 	int rc = 0;
-	uint32_t dma_list_size, vig_list_size, wb2_list_size;
+	uint32_t vig_list_size, wb2_list_size;
 	uint32_t virt_vig_list_size, in_rot_list_size = 0;
 	uint32_t cursor_list_size = 0;
 	uint32_t index = 0;
@@ -4096,17 +4144,9 @@ static int sde_hardware_format_caps(struct sde_mdss_cfg *sde_cfg,
 	}
 
 	/* DMA pipe input formats */
-	dma_list_size = ARRAY_SIZE(plane_formats);
-
-	sde_cfg->dma_formats = kcalloc(dma_list_size,
-		sizeof(struct sde_format_extended), GFP_KERNEL);
-	if (!sde_cfg->dma_formats) {
-		rc = -ENOMEM;
+	rc = sde_init_dma_formats(sde_cfg);
+	if (rc)
 		goto free_cursor;
-	}
-
-	index = sde_copy_formats(sde_cfg->dma_formats, dma_list_size,
-			0, plane_formats, ARRAY_SIZE(plane_formats));
 
 	/* ViG pipe input formats */
 	vig_list_size = ARRAY_SIZE(plane_formats_vig);

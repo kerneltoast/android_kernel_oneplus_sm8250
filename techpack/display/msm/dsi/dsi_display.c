@@ -10,6 +10,7 @@
 
 #include "msm_drv.h"
 #include "sde_connector.h"
+#include "sde_encoder.h"
 #include "msm_mmu.h"
 #include "dsi_display.h"
 #include "dsi_panel.h"
@@ -190,6 +191,18 @@ void dsi_rect_intersect(const struct dsi_rect *r1,
 	}
 }
 
+static void dsi_display_set_dgm_bl(struct drm_connector *connector, u32 bl_lvl)
+{
+	struct sde_connector *c = to_sde_connector(connector);
+	struct drm_encoder *encoder = c->encoder; /* There's only one encoder */
+	struct sde_kms *kms = sde_encoder_get_kms(encoder);
+	struct sde_dgm_csc *dgm = &kms->dgm_csc;
+
+	spin_lock(&dgm->lock);
+	dgm->bl_lvl = bl_lvl;
+	spin_unlock(&dgm->lock);
+}
+
 int dsi_display_set_backlight(struct drm_connector *connector,
 		void *display, u32 bl_lvl)
 {
@@ -227,6 +240,11 @@ int dsi_display_set_backlight(struct drm_connector *connector,
 		DSI_ERR("[%s] failed to enable DSI core clocks, rc=%d\n",
 		       dsi_display->name, rc);
 		goto error;
+	}
+
+	if (IS_ENABLED(CONFIG_SDE_DGM_DIMMING)) {
+		dsi_display_set_dgm_bl(connector, bl_temp);
+		bl_temp = panel->bl_config.bl_max_level;
 	}
 
 	rc = dsi_panel_set_backlight(panel, (u32)bl_temp);

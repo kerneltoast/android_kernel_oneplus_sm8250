@@ -1219,6 +1219,7 @@ static void sde_color_process_plane_setup(struct drm_plane *plane)
 		psde->pipe_hw->ops.setup_vig_igc(psde->pipe_hw, &hw_cfg);
 	}
 
+#ifndef CONFIG_SDE_DGM_DIMMING
 	if (pstate->dirty & SDE_PLANE_DIRTY_DMA_IGC &&
 			psde->pipe_hw->ops.setup_dma_igc) {
 		igc = msm_property_get_blob(&psde->property_info,
@@ -1232,6 +1233,7 @@ static void sde_color_process_plane_setup(struct drm_plane *plane)
 		psde->pipe_hw->ops.setup_dma_igc(psde->pipe_hw, &hw_cfg,
 				pstate->multirect_index);
 	}
+#endif
 
 	if (pstate->dirty & SDE_PLANE_DIRTY_DMA_GC &&
 			psde->pipe_hw->ops.setup_dma_gc) {
@@ -3120,9 +3122,11 @@ static void _sde_plane_update_format_and_rects(struct sde_plane *psde,
 			pstate->multirect_index, pma_mode);
 	}
 
+#ifndef CONFIG_SDE_DGM_DIMMING
 	if (psde->pipe_hw->ops.setup_dgm_csc)
 		psde->pipe_hw->ops.setup_dgm_csc(psde->pipe_hw,
 			pstate->multirect_index, psde->csc_usr_ptr);
+#endif
 }
 
 static void _sde_plane_update_sharpening(struct sde_plane *psde)
@@ -3656,12 +3660,14 @@ static void _sde_plane_install_properties(struct drm_plane *plane,
 		sde_kms_info_add_keyint(info, "inverse_pma", 1);
 	}
 
+#ifndef CONFIG_SDE_DGM_DIMMING
 	if (psde->features & BIT(SDE_SSPP_DGM_CSC)) {
 		msm_property_install_volatile_range(
 			&psde->property_info, "csc_dma_v1", 0x0,
 			0, ~0, 0, PLANE_PROP_CSC_DMA_V1);
 		sde_kms_info_add_keyint(info, "csc_dma_v1", 1);
 	}
+#endif
 
 	if (psde->features & BIT(SDE_SSPP_SEC_UI_ALLOWED))
 		sde_kms_info_add_keyint(info, "sec_ui_allowed", 1);
@@ -3743,6 +3749,7 @@ static void _sde_plane_install_properties(struct drm_plane *plane,
 			PLANE_PROP_VIG_IGC);
 	}
 
+#ifndef CONFIG_SDE_DGM_DIMMING
 	if (psde->features & BIT(SDE_SSPP_DMA_IGC)) {
 		snprintf(feature_name, sizeof(feature_name), "%s%d",
 			"SDE_DGM_1D_LUT_IGC_V",
@@ -3750,6 +3757,7 @@ static void _sde_plane_install_properties(struct drm_plane *plane,
 		msm_property_install_blob(&psde->property_info, feature_name, 0,
 			PLANE_PROP_DMA_IGC);
 	}
+#endif
 
 	if (psde->features & BIT(SDE_SSPP_DMA_GC)) {
 		snprintf(feature_name, sizeof(feature_name), "%s%d",
@@ -4696,4 +4704,296 @@ clean_plane:
 	kfree(psde);
 exit:
 	return ERR_PTR(ret);
+}
+
+/*
+ * The Inverse Gamma Correction (IGC) DGM block in the Source Surface Processor
+ * Pipe (SSPP) maps 8-bit color values to 12-bit values using a 1-dimensional
+ * look-up table (LUT). IGC's intended use is to de-gamma a source image (sRGB
+ * in the case of Android), so that the Color Space Conversion (CSC) DGM block
+ * can operate in the linear RGB color space. Then, the Gamma Correction (GC)
+ * DGM block can apply any desired gamma to the output from the CSC block.
+ *
+ * In the DGM block, the order of operations is as follows: IGC -> CSC -> GC.
+ *
+ * Since the IGC block only accepts a 1-D LUT, that means the same LUT is used
+ * for all color channels. As such, IGC in the DGM block can only alter the
+ * white point of source images. This is different from the IGC block in the
+ * Destination Surface Processor Pipe (DSPP), which supports a 3-D LUT.
+ *
+ * The IGC block contains a dither feature that implements ordered dithering,
+ * which is very useful since this is the only way to apply dithering prior to
+ * quantization by CSC. Dithering prior to quantization yields a far superior
+ * dither result, so we want to use the SSPP IGC block's dither feature. Without
+ * dithering, CSC can produce severe quantization error that leads to visual
+ * color banding when CSC quantizes a lot.
+ *
+ * The IGC block's dithering is both additive and subtractive (i.e., it will
+ * either add or subtract from every color channel in every pixel), and it won't
+ * dither the alpha channel if an alpha channel is present in the pixel format;
+ * the alpha channel is passed through the dither block unchanged. Since
+ * dithering the alpha channel results in layer blending artifacts, this means
+ * that we must only use pixel formats which have an explicit alpha channel
+ * (e.g., ABGR8888), otherwise the alpha channel would get dithered when it's
+ * implicit in the pixel format (e.g., XBGR8888).
+ *
+ * Most importantly, dithering in the IGC block occurs *before* the LUT mapping,
+ * so the dithering step comes first.
+ *
+ * The IGC block has a programmable dither strength value that accepts a value
+ * between 0 and 15, inclusive. The strength value and the ordered dithering are
+ * empirically found to have the following behavior:
+ * 	-At strength ==  0, up to  1 is added/subtracted to/from each color
+ * 	-At strength ==  6, up to  8 is added/subtracted to/from each color
+ * 	-At strength == 15, up to 16 is added/subtracted to/from each color
+ *
+ * This was discovered by dithering a pure black image and then using the GC
+ * block to determine what colors were rendered on the panel. The GC block maps
+ * 8-bit color values to 10-bit values with a 1-D LUT, and by mapping one color
+ * to pure white at a time, the GC block can be used to clearly visualize on the
+ * panel the results of the IGC block's dither operation.
+ *
+ * Since the IGC block's dithering is partly additive, that means that any
+ * amount of dithering will make it impossible for the panel to show pure black
+ * color anymore; the black will get dithered into a very faint gray. This is
+ * quite problematic on OLED panels, since OLED pixels are only turned off when
+ * they're rendering pure black. The inability to render pure black also
+ * produces layer blending artifacts during fade in/out animations. To fix this,
+ * we simply map the first N number of IGC LUT entries to zero, which works to
+ * eliminate the gray color produced by dithering a black image since dithering
+ * occurs *prior* to LUT mapping. The 'N' in this case is simply the maximum
+ * amount that the dithering operation may have added to each color channel; at
+ * strength == 0, N = 1; at strength == 6, N = 8; at strength == 15, N = 16.
+ *
+ * It is empirically found that a dither strength value of 6 is sufficient to
+ * cover the worst possible quantization error produced by CSC. Then, to account
+ * for pure black turning into gray, we map the first 8 values of the IGC LUT to
+ * zero.
+ *
+ * Since we're only abusing IGC to take advantage of its dither feature, we use
+ * a linear translation from 8-bit color values to 12-bit values, generated by
+ * the following simple C program that also rounds each value:
+ *	#include <stdio.h>
+ * 	int main()
+ * 	{
+ * 		for (int i = 0; i <= 255; i++)
+ * 			printf("%.0f,", (float)i * 4095 / 255);
+ * 	}
+ *
+ * The linear LUT means that IGC won't produce any change in white point.
+ */
+static const struct drm_msm_igc_lut sde_dgm_dimming_igc_lut = {
+	.flags = IGC_DITHER_ENABLE,
+	.strength = 6,
+	.c2 = {
+		/*
+		 * The first 8 values are set to zero to compensate for a dither
+		 * strength of 6.
+		 */
+		   0  /* 0 */, 0 /* 16 */, 0 /* 32 */, 0  /* 48 */,
+		   0 /* 64 */, 0 /* 80 */, 0 /* 96 */, 0 /* 112 */,
+		 128,  145,  161,  177,  193,  209,  225,  241,  257,  273,
+		 289,  305,  321,  337,  353,  369,  385,  401,  418,  434,
+		 450,  466,  482,  498,  514,  530,  546,  562,  578,  594,
+		 610,  626,  642,  658,  674,  691,  707,  723,  739,  755,
+		 771,  787,  803,  819,  835,  851,  867,  883,  899,  915,
+		 931,  947,  964,  980,  996, 1012, 1028, 1044, 1060, 1076,
+		1092, 1108, 1124, 1140, 1156, 1172, 1188, 1204, 1220, 1237,
+		1253, 1269, 1285, 1301, 1317, 1333, 1349, 1365, 1381, 1397,
+		1413, 1429, 1445, 1461, 1477, 1493, 1510, 1526, 1542, 1558,
+		1574, 1590, 1606, 1622, 1638, 1654, 1670, 1686, 1702, 1718,
+		1734, 1750, 1766, 1783, 1799, 1815, 1831, 1847, 1863, 1879,
+		1895, 1911, 1927, 1943, 1959, 1975, 1991, 2007, 2023, 2039,
+		2056, 2072, 2088, 2104, 2120, 2136, 2152, 2168, 2184, 2200,
+		2216, 2232, 2248, 2264, 2280, 2296, 2312, 2329, 2345, 2361,
+		2377, 2393, 2409, 2425, 2441, 2457, 2473, 2489, 2505, 2521,
+		2537, 2553, 2569, 2585, 2602, 2618, 2634, 2650, 2666, 2682,
+		2698, 2714, 2730, 2746, 2762, 2778, 2794, 2810, 2826, 2842,
+		2858, 2875, 2891, 2907, 2923, 2939, 2955, 2971, 2987, 3003,
+		3019, 3035, 3051, 3067, 3083, 3099, 3115, 3131, 3148, 3164,
+		3180, 3196, 3212, 3228, 3244, 3260, 3276, 3292, 3308, 3324,
+		3340, 3356, 3372, 3388, 3404, 3421, 3437, 3453, 3469, 3485,
+		3501, 3517, 3533, 3549, 3565, 3581, 3597, 3613, 3629, 3645,
+		3661, 3677, 3694, 3710, 3726, 3742, 3758, 3774, 3790, 3806,
+		3822, 3838, 3854, 3870, 3886, 3902, 3918, 3934, 3950, 3967,
+		3983, 3999, 4015, 4031, 4047, 4063, 4079, 4095
+	}
+};
+
+/*
+ * Since brightness is scaled in the sRGB color space, some math is needed to
+ * convert relative luminance (luma) to an sRGB coefficient to scale brightness
+ * correctly. Luma doesn't scale linearly in sRGB, so calculating the conversion
+ * from linear RGB to sRGB on the fly is a lot of work. Since DGM CSC only
+ * supports 512 values (513 including 0), we can just make a look-up table (LUT)
+ * instead.
+ *
+ * This LUT works by passing in the brightness level scaled to 512 in order to
+ * get the sRGB color value of the D65 white point using the 2° observer
+ * correctly scaled to the desired luma. For example, for a desired brightness
+ * of 50% (i.e., luma = 50%), you would scale each sRGB color channel to
+ * `sde_dgm_dimming_bl_lut[512 / 2]` to make the resulting image half as bright.
+ * For the record, 50% luma corresponds roughly to sRGB * 0.73 (not sRGB * 0.5).
+ *
+ * This table is generated using sRGB with a gamma of 2.3 rather than 2.2 to
+ * compensate for the brightness lost to the IGC block's dither operation. This
+ * brightness mapping should also ideally correlate to the panel's brightness
+ * control mechanism in hardware, otherwise the auto-brightness configuration in
+ * userspace will need to be recalibrated. In other words, the panel's native
+ * brightness control should follow gamma 2.2 in order for auto-brightness to
+ * behave exactly the same as before. This assumption may not be true for
+ * low-quality panels, where it wouldn't be much of a surprise to have a broken
+ * brightness control mechanism.
+ *
+ * This table is generated by the following C program:
+ * 	#include <stdio.h>
+ * 	#include <math.h>
+ * 	int main()
+ * 	{
+ * 		// White point for 2° observer, D65 illuminant
+ * 		const double x = 0.31271, y = 0.32902;
+ * 		float X, Y, Z;
+ * 		float R, sR;
+ *
+ * 		for (int i = 0; i <= 512; i++) {
+ * 			// Scale relative luminance (Y), convert from xyY to XYZ
+ * 			Y = (double)i / 512.0;
+ * 			X = x * Y / y;
+ * 			Z = (1.0 - x - y) * Y / y;
+ *
+ * 			// Convert from XYZ to linear RGB (red only)
+ * 			R = X * 3.2404542 + Y * -1.5371385 + Z * -0.4985314;
+ *
+ * 			// Convert from linear RGB to sRGB with a gamma of 2.3
+ * 			if (R <= 0.0031308)
+ * 				sR = 12.92 * R;
+ * 			else
+ * 				sR = 1.055 * pow(R, 1.0 / 2.3) - 0.055;
+ *
+ * 			// Print the sRGB luminance scaled to 512 and rounded
+ * 			printf("%.0f,", sR * 512.0);
+ * 		}
+ * 	}
+ */
+static const u16 sde_dgm_dimming_bl_lut[SDE_HW_CSC_MAX + 1] = {
+	  0,  13,  20,  30,  37,  44,  50,  55,  60,  65,  69,  74,  77,  81,
+	 85,  88,  92,  95,  98, 101, 104, 107, 109, 112, 115, 117, 120, 122,
+	125, 127, 129, 131, 134, 136, 138, 140, 142, 144, 146, 148, 150, 152,
+	154, 156, 158, 159, 161, 163, 165, 167, 168, 170, 172, 173, 175, 177,
+	178, 180, 181, 183, 184, 186, 188, 189, 191, 192, 193, 195, 196, 198,
+	199, 201, 202, 203, 205, 206, 208, 209, 210, 212, 213, 214, 215, 217,
+	218, 219, 221, 222, 223, 224, 225, 227, 228, 229, 230, 232, 233, 234,
+	235, 236, 237, 239, 240, 241, 242, 243, 244, 245, 246, 248, 249, 250,
+	251, 252, 253, 254, 255, 256, 257, 258, 259, 260, 261, 262, 263, 264,
+	265, 266, 267, 268, 269, 270, 271, 272, 273, 274, 275, 276, 277, 278,
+	279, 280, 281, 282, 283, 284, 285, 286, 287, 288, 289, 289, 290, 291,
+	292, 293, 294, 295, 296, 297, 298, 298, 299, 300, 301, 302, 303, 304,
+	305, 305, 306, 307, 308, 309, 310, 311, 311, 312, 313, 314, 315, 316,
+	316, 317, 318, 319, 320, 320, 321, 322, 323, 324, 324, 325, 326, 327,
+	328, 328, 329, 330, 331, 332, 332, 333, 334, 335, 335, 336, 337, 338,
+	338, 339, 340, 341, 341, 342, 343, 344, 344, 345, 346, 347, 347, 348,
+	349, 350, 350, 351, 352, 353, 353, 354, 355, 355, 356, 357, 358, 358,
+	359, 360, 360, 361, 362, 362, 363, 364, 365, 365, 366, 367, 367, 368,
+	369, 369, 370, 371, 371, 372, 373, 373, 374, 375, 375, 376, 377, 377,
+	378, 379, 379, 380, 381, 381, 382, 383, 383, 384, 385, 385, 386, 387,
+	387, 388, 389, 389, 390, 391, 391, 392, 392, 393, 394, 394, 395, 396,
+	396, 397, 397, 398, 399, 399, 400, 401, 401, 402, 402, 403, 404, 404,
+	405, 405, 406, 407, 407, 408, 409, 409, 410, 410, 411, 412, 412, 413,
+	413, 414, 415, 415, 416, 416, 417, 417, 418, 419, 419, 420, 420, 421,
+	422, 422, 423, 423, 424, 424, 425, 426, 426, 427, 427, 428, 428, 429,
+	430, 430, 431, 431, 432, 432, 433, 434, 434, 435, 435, 436, 436, 437,
+	438, 438, 439, 439, 440, 440, 441, 441, 442, 442, 443, 444, 444, 445,
+	445, 446, 446, 447, 447, 448, 448, 449, 450, 450, 451, 451, 452, 452,
+	453, 453, 454, 454, 455, 455, 456, 456, 457, 458, 458, 459, 459, 460,
+	460, 461, 461, 462, 462, 463, 463, 464, 464, 465, 465, 466, 466, 467,
+	467, 468, 468, 469, 469, 470, 470, 471, 471, 472, 472, 473, 474, 474,
+	475, 475, 476, 476, 477, 477, 478, 478, 479, 479, 480, 480, 481, 481,
+	481, 482, 482, 483, 483, 484, 484, 485, 485, 486, 486, 487, 487, 488,
+	488, 489, 489, 490, 490, 491, 491, 492, 492, 493, 493, 494, 494, 495,
+	495, 496, 496, 497, 497, 497, 498, 498, 499, 499, 500, 500, 501, 501,
+	502, 502, 503, 503, 504, 504, 505, 505, 505, 506, 506, 507, 507, 508,
+	508, 509, 509, 510, 510, 511, 511, 512, 512
+};
+
+void sde_plane_update_dgm_dimming(struct drm_crtc *crtc, struct sde_kms *kms)
+{
+	struct sde_dgm_csc *dgm = &kms->dgm_csc;
+	struct sde_hw_cp_cfg igc_hw_cfg = {
+		.len = sizeof(sde_dgm_dimming_igc_lut),
+		.ctl = to_sde_crtc(crtc)->mixers->hw_ctl
+	};
+	struct sde_csc_cfg csc = {}, *csc_ptr;
+	struct drm_plane *plane;
+	u32 bl_lvl;
+
+	if (!IS_ENABLED(CONFIG_SDE_DGM_DIMMING))
+		return;
+
+	/* Get a consistent view of the backlight level and PCC config */
+	spin_lock(&dgm->lock);
+	bl_lvl = dgm->bl_lvl;
+	csc.csc_mv[0] = dgm->pcc.r;
+	csc.csc_mv[4] = dgm->pcc.g;
+	csc.csc_mv[8] = dgm->pcc.b;
+	spin_unlock(&dgm->lock);
+
+	/* Scale the backlight for CSC and get the correct relative luminance */
+	bl_lvl = sde_dgm_dimming_bl_lut[SDE_HW_CSC_MAX * bl_lvl / dgm->bl_max];
+
+	/* Compute each color channel's (R, G, B) primary matrix coefficient */
+	csc.csc_mv[0] = bl_lvl * csc.csc_mv[0] / SDE_HW_PCC_MAX;
+	csc.csc_mv[4] = bl_lvl * csc.csc_mv[4] / SDE_HW_PCC_MAX;
+	csc.csc_mv[8] = bl_lvl * csc.csc_mv[8] / SDE_HW_PCC_MAX;
+
+	/* Reset the hint for notifying the fingerprint driver */
+	kms->fod_present = false;
+
+	/*
+	 * Apply a diagonal 3x3 CSC matrix to all active source pipes so that
+	 * everything on the CRTC is color-adjusted, to emulate DSPP PCC and
+	 * panel backlight control. It is guaranteed that every active pipe is a
+	 * DMA pipe with DGM CSC, since those are the only pipes that are
+	 * exposed to userspace. The multiplications for calculating the matrix
+	 * coefficients are done with 64 bits to avoid overflow and thus
+	 * truncation. PCC and the backlight level are combined and scaled to
+	 * the max CSC value to get the final matrix coefficient for the color
+	 * channel. It is guaranteed that the source image pixel format is in
+	 * the RGB color space, since the DMA pipes don't support anything else.
+	 *
+	 * Since IGC isn't used to de-gamma the sRGB source images from Android,
+	 * this means that CSC is operating on sRGB pixels, *not* linear RGB
+	 * pixels. Although CSC _could_ operate on linear RGB pixels if we used
+	 * IGC and GC to un-apply and re-apply gamma, respectively, we need to
+	 * operate on the sRGB pixels in order to emulate PCC correctly, since
+	 * DSPP PCC operates on gamma-corrected pixels. We also don't want to
+	 * needlessly use the GC block when IGC and CSC alone are sufficient.
+	 *
+	 * IGC is applied to every layer in order to utilize its dithering
+	 * capabilities to compensate for the quantization error caused by
+	 * controlling panel brightness in software via CSC.
+	 *
+	 * When the layer in question has the fod circle on it, skip both CSC
+	 * and IGC to make it as bright as possible.
+	 */
+	drm_atomic_crtc_for_each_plane(plane, crtc) {
+		struct drm_plane_state *state = plane->state;
+		struct sde_plane_state *pstate = to_sde_plane_state(state);
+		struct sde_plane *psde = to_sde_plane(plane);
+		struct sde_hw_pipe *hw = psde->pipe_hw;
+
+		if (!sde_plane_enabled(state))
+			continue;
+
+		if (sde_plane_get_property(pstate, PLANE_PROP_FOD)) {
+			csc_ptr = NULL;
+			igc_hw_cfg.payload = NULL;
+			kms->fod_present = true;
+		} else {
+			csc_ptr = &csc;
+			igc_hw_cfg.payload = (void *)&sde_dgm_dimming_igc_lut;
+		}
+
+		hw->ops.setup_dma_igc(hw, &igc_hw_cfg, pstate->multirect_index);
+		hw->ops.setup_dgm_csc(hw, pstate->multirect_index, csc_ptr);
+	}
 }
